@@ -1,0 +1,17 @@
+# Build artifacts
+target/
+*.class
+*.jar
+*.log
+*.tmp
+
+# IDEs / editors
+.vscode/
+.idea/
+
+# macOS junk
+.DS_Store
+
+# Environment / tokens
+*.env
+*.token
