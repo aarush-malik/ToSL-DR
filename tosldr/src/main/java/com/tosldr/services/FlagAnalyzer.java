@@ -73,6 +73,7 @@ public class FlagAnalyzer {
 
         String lower = text.toLowerCase();
 
+        // --- Core keyword rules ---
         for (Rule rule : RULES) {
             for (String pattern : rule.patterns) {
                 String p = pattern.toLowerCase();
@@ -93,6 +94,22 @@ public class FlagAnalyzer {
             }
         }
 
+        // --- Special LeetCode burnout warning (Option A) ---
+        if (lower.contains("leetcode")) {
+            int idx = lower.indexOf("leetcode");
+            String snippet = extractSnippet(text, idx, "leetcode".length());
+
+            results.add(new FlagResult(
+                    "LeetCode burnout warning",
+                    "Mental health",
+                    "Heavy use of LeetCode may cause anxiety, impostor syndrome, and the urge to refresh Blind 75 at 3am.",
+                    FlagResult.Severity.HIGH,
+                    snippet,
+                    idx
+            ));
+        }
+
+        // --- Fallback message ---
         if (results.isEmpty()) {
             results.add(new FlagResult(
                     "No obvious red-flag keywords detected",
@@ -107,13 +124,8 @@ public class FlagAnalyzer {
         return results;
     }
 
-        // --- Overall risk scoring helpers ---
+    // --- Overall risk scoring helpers ---
 
-    /**
-     * Compute a simple 0–100 "safety" score from the list of flags.
-     * 100 = very user-friendly, 0 = very risky.
-     * This is just a heuristic, not legal advice.
-     */
     public static int computeRiskScore(java.util.List<FlagResult> flags) {
         if (flags == null || flags.isEmpty()) {
             return 80; // neutral-ish if nothing found
@@ -122,7 +134,6 @@ public class FlagAnalyzer {
         int penalty = 0;
 
         for (FlagResult f : flags) {
-            // Skip the "no obvious flags" informational item
             if (f.getStartIndex() < 0) continue;
 
             switch (f.getSeverity()) {
@@ -138,9 +149,6 @@ public class FlagAnalyzer {
         return score;
     }
 
-    /**
-     * Human-friendly label for the score.
-     */
     public static String labelForScore(int score) {
         if (score >= 80) return "Generally user-friendly";
         if (score >= 60) return "Some concerns";
@@ -154,7 +162,6 @@ public class FlagAnalyzer {
         int end = Math.min(text.length(), index + length + context);
 
         String raw = text.substring(start, end);
-        // flatten whitespace for display
         return raw.replaceAll("\\s+", " ").trim();
     }
 }

@@ -4,6 +4,7 @@ import com.tosldr.services.FlagAnalyzer;
 import com.tosldr.services.FlagResult;
 import com.tosldr.services.HuggingFaceClient;
 import com.tosldr.services.SummarizerService;
+import com.tosldr.services.QuizDialog;
 
 import javax.swing.*;
 import java.awt.*;
@@ -15,6 +16,8 @@ import java.net.http.HttpResponse;
 import com.tosldr.services.WebFetcher;
 
 public class MainGUI extends JFrame {
+    private int summarizationCount = 0;
+    private boolean quizAlreadyOffered = false;
 
     private JTextArea inputArea;
     private JTextField urlField;
@@ -29,6 +32,36 @@ public class MainGUI extends JFrame {
     private final FlagAnalyzer flagAnalyzer;
 
     public MainGUI() {
+        // Colorful Catppuccin Macchiato Theme
+        try {
+            UIManager.setLookAndFeel("javax.swing.plaf.nimbus.NimbusLookAndFeel");
+
+            // Modern font – Inter if available
+            Font uiFont = new Font("Inter", Font.PLAIN, 14);
+            if (!uiFont.getFamily().equals("Inter")) {
+                uiFont = new Font("Segoe UI", Font.PLAIN, 14);
+            }
+            UIManager.put("defaultFont", uiFont);
+
+            // Base background
+            UIManager.put("control", new Color(0x24, 0x27, 0x3A)); // #24273A
+            UIManager.put("nimbusLightBackground", new Color(0x1E, 0x20, 0x30)); // #1E2030
+            UIManager.put("text", new Color(0xEE, 0xEE, 0xEE)); // bright white text
+
+            // Selection colors (teal)
+            UIManager.put("nimbusSelectionBackground", new Color(0x8B, 0xD5, 0xCA)); // teal
+            UIManager.put("nimbusFocus", new Color(0x8B, 0xD5, 0xCA));
+
+            // Accents (mauve)
+            UIManager.put("nimbusBase", new Color(0xC6, 0xA0, 0xF6)); // mauve
+
+            // Divider & borders
+            UIManager.put("nimbusBlueGrey", new Color(0x36, 0x39, 0x54)); // #363954
+
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+        
         setTitle("TosL;DR - Terms of Service Summarizer");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(1000, 650);
@@ -58,7 +91,7 @@ public class MainGUI extends JFrame {
         // Enable Cmd+V paste on macOS for URL field
         KeyStroke pasteKeyURL = KeyStroke.getKeyStroke("meta V");
         urlField.getInputMap().put(pasteKeyURL, "paste");
-        fetchButton = new JButton("Fetch ToS from URL");
+        fetchButton = new ModernButton("Fetch ToS from URL");
         urlPanel.setBorder(BorderFactory.createTitledBorder("Load from URL"));
         urlPanel.add(urlField, BorderLayout.CENTER);
         urlPanel.add(fetchButton, BorderLayout.EAST);
@@ -68,6 +101,9 @@ public class MainGUI extends JFrame {
         inputArea.setEditable(true);
         inputArea.setLineWrap(true);
         inputArea.setWrapStyleWord(true);
+        inputArea.setBackground(new Color(0x1E2030));
+        inputArea.setForeground(new Color(0xF4F4F5));
+        inputArea.setCaretColor(new Color(0xC6A0F6)); // mauve caret
 
         // Ensure Cmd+V does paste
         KeyStroke pasteKey = KeyStroke.getKeyStroke("meta V"); // meta = Command on Mac
@@ -84,10 +120,16 @@ public class MainGUI extends JFrame {
         summaryArea.setWrapStyleWord(true);
         JScrollPane summaryScroll = new JScrollPane(summaryArea);
         summaryScroll.setBorder(BorderFactory.createTitledBorder("Plain-Language Summary"));
+        summaryArea.setBackground(new Color(0x1E2030));
+        summaryArea.setForeground(new Color(0xF4F4F5));
+        summaryArea.setCaretColor(new Color(0x8AADF4)); // blue caret
 
         // Right bottom: flags list with color-coded renderer
         flagsList = new JList<>();
         flagsList.setCellRenderer(new FlagCellRenderer());
+        flagsList.setBackground(new Color(0x24273A));
+        flagsList.setForeground(new Color(0xF4F4F5));
+
 
         // click flag → jump to snippet in ToS
         flagsList.addListSelectionListener(e -> {
@@ -136,7 +178,7 @@ public class MainGUI extends JFrame {
         centerSplit.setResizeWeight(0.5);
 
         // Bottom: button + inline progress bar
-        summarizeButton = new JButton("Summarize & Analyze");
+        summarizeButton = new ModernButton("Summarize & Analyze");
         progressBar = new JProgressBar();
         progressBar.setIndeterminate(true);
         progressBar.setVisible(false);
@@ -205,6 +247,24 @@ public class MainGUI extends JFrame {
                 return;
             }
 
+            // --- SPECIAL HIGH-RISK POPUP FOR LEETCODE ---
+            if (text.toLowerCase().contains("leetcode")) {
+                SwingUtilities.invokeLater(() -> {
+                    JOptionPane.showMessageDialog(
+                            this,
+                            "<html><b>⚠️ Special High-Risk Warning</b><br><br>" +
+                            "LeetCode Terms detected.<br>" +
+                            "Extended use of LeetCode may cause:<br>" +
+                            "- chronic impostor syndrome,<br>" +
+                            "- obsessive Blind 75 refresh cycles,<br>" +
+                            "- spontaneous system.out.println(\"why am I doing this\");<br><br>" +
+                            "<i>Proceed at your own mental health risk.</i></html>",
+                            "LeetCode Warning",
+                            JOptionPane.WARNING_MESSAGE
+                    );
+                });
+            }
+
             summaryArea.setText("Summarizing, please wait...");
             flagsList.setListData(new FlagResult[0]);
             progressBar.setVisible(true);
@@ -223,6 +283,31 @@ public class MainGUI extends JFrame {
                         int score = FlagAnalyzer.computeRiskScore(flags);
                         String label = FlagAnalyzer.labelForScore(score);
                         scoreLabel.setText("Overall risk score: " + score + "/100 (" + label + ")");
+
+                        // Track number of uses
+                        summarizationCount++;
+
+                        // --- Offer quiz only after 3 uses & only once ---
+                        if (summarizationCount >= 3 && !quizAlreadyOffered) {
+                            quizAlreadyOffered = true; // prevent future prompts
+
+                            int ask = JOptionPane.showConfirmDialog(
+                                    this,
+                                    "You've analyzed a few Terms now — want to try a quick 'Spot the Red Flag' quiz?",
+                                    "Try Quiz?",
+                                    JOptionPane.YES_NO_OPTION
+                            );
+
+                            if (ask == JOptionPane.YES_OPTION) {
+                                // Delay so UI feels calmer
+                                new javax.swing.Timer(700, evt -> {
+                                    QuizDialog.showQuiz(this, flags);
+                                }) {{
+                                    setRepeats(false);
+                                    start();
+                                }};
+                            }
+                        }
                     });
                 } catch (Exception ex) {
                     ex.printStackTrace();
@@ -236,6 +321,7 @@ public class MainGUI extends JFrame {
                 }
             }).start();
         });
+
     }
 
     // --- URL fetch + HTML→text helpers ---
@@ -302,14 +388,51 @@ public class MainGUI extends JFrame {
         }
     }
 
+    private static class ModernButton extends JButton {
+        ModernButton(String text) {
+            super(text);
+            setContentAreaFilled(false);
+            setFocusPainted(false);
+            setForeground(Color.WHITE);
+            setBorder(BorderFactory.createEmptyBorder(8, 18, 8, 18));
+
+            setFont(new Font("Inter", Font.BOLD, 14));
+
+            addMouseListener(new java.awt.event.MouseAdapter() {
+                public void mouseEntered(java.awt.event.MouseEvent e) {
+                    setForeground(new Color(0xF5, 0xBD, 0xE6)); // pink
+                }
+                public void mouseExited(java.awt.event.MouseEvent e) {
+                    setForeground(Color.WHITE);
+                }
+            });
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            GradientPaint gp = new GradientPaint(
+                0, 0, new Color(0x8A, 0xAD, 0xF4),   // blue
+                getWidth(), getHeight(), new Color(0xC6, 0xA0, 0xF6) // mauve
+            );
+            g2.setPaint(gp);
+            g2.fillRoundRect(0, 0, getWidth(), getHeight(), 16, 16);
+
+            g2.dispose();
+            super.paintComponent(g);
+        }
+    }
+
     // Legend panel for flag colors
     private JPanel buildLegendPanel() {
         JPanel legend = new JPanel();
         legend.setLayout(new FlowLayout(FlowLayout.LEFT, 8, 2));
 
-        legend.add(makeLegendLabel("● High risk", new Color(180, 0, 0)));
-        legend.add(makeLegendLabel("● Medium",  new Color(200, 120, 0)));
-        legend.add(makeLegendLabel("● Low / info", new Color(0, 90, 0)));
+        legend.add(makeLegendLabel("● High Risk", new Color(180, 0, 0)));
+        legend.add(makeLegendLabel("● Medium Risk",  new Color(200, 120, 0)));
+        legend.add(makeLegendLabel("● Low Risk", new Color(0, 90, 0)));
 
         return legend;
     }
