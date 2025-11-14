@@ -6,122 +6,155 @@ import java.util.List;
 public class FlagAnalyzer {
 
     private static class Rule {
-        final String keyword;
         final String title;
         final String category;
         final String explanation;
         final FlagResult.Severity severity;
+        final String[] patterns;
 
-        Rule(String keyword, String title, String category,
-             String explanation, FlagResult.Severity severity) {
-            this.keyword = keyword;
+        Rule(String title,
+             String category,
+             String explanation,
+             FlagResult.Severity severity,
+             String... patterns) {
             this.title = title;
             this.category = category;
             this.explanation = explanation;
             this.severity = severity;
+            this.patterns = patterns;
         }
     }
 
-    private static final Rule[] RULES = {
-        new Rule("binding arbitration",
-                "Binding arbitration clause",
-                "Dispute resolution",
-                "You may be forced to resolve disputes in private arbitration instead of going to court.",
-                FlagResult.Severity.HIGH),
-        new Rule("arbitration",
-                "Arbitration requirement",
-                "Dispute resolution",
-                "Disputes might have to be handled through arbitration, which can limit your options.",
-                FlagResult.Severity.MEDIUM),
-        new Rule("class action",
-                "Class action waiver",
-                "Legal rights",
-                "You may be waiving your right to join a class action lawsuit.",
-                FlagResult.Severity.HIGH),
-        new Rule("third party",
-                "Sharing with third parties",
-                "Data sharing",
-                "Your data may be shared with third parties, possibly for analytics or advertising.",
-                FlagResult.Severity.MEDIUM),
-        new Rule("sell your data",
-                "Sale of personal data",
-                "Data sharing",
-                "Your personal data might be sold, which is a strong privacy risk.",
-                FlagResult.Severity.HIGH),
-        new Rule("marketing partners",
-                "Marketing partners",
-                "Data sharing",
-                "Your information may be shared with marketing partners for targeted advertising.",
-                FlagResult.Severity.MEDIUM),
-        new Rule("auto-renew",
-                "Auto-renewing subscription",
-                "Billing",
-                "Your subscription may renew automatically unless you cancel in time.",
-                FlagResult.Severity.MEDIUM),
-        new Rule("subscription",
-                "Subscription terms",
-                "Billing",
-                "Check how often you’re billed and how to cancel before renewal.",
-                FlagResult.Severity.LOW),
-        new Rule("terminate your account",
-                "Unilateral termination",
-                "Account control",
-                "The service can terminate your account, possibly with limited notice.",
-                FlagResult.Severity.MEDIUM),
-        new Rule("without notice",
-                "Changes without notice",
-                "Account control",
-                "Terms may change or your access may be limited without prior notice.",
-                FlagResult.Severity.MEDIUM),
-        new Rule("cookies",
-                "Extensive cookie tracking",
-                "Tracking",
-                "The site may track your activity using cookies and similar technologies.",
-                FlagResult.Severity.LOW),
-        new Rule("tracking",
-                "User tracking",
-                "Tracking",
-                "Your behavior may be tracked across the site or other services.",
-                FlagResult.Severity.LOW)
+    // You can tweak wording / severities if you want
+    private static final Rule[] RULES = new Rule[] {
+        new Rule(
+            "Arbitration requirement",
+            "Dispute resolution",
+            "Disputes may have to be handled through arbitration, which can limit your ability to go to court.",
+            FlagResult.Severity.MEDIUM,
+            "binding arbitration", "arbitration"
+        ),
+        new Rule(
+            "Class action waiver",
+            "Legal rights",
+            "You may be waiving your right to join a class action lawsuit.",
+            FlagResult.Severity.HIGH,
+            "class action waiver", "waive your right to bring a class action", "class action"
+        ),
+        new Rule(
+            "Sharing with third parties",
+            "Data sharing",
+            "Your data may be shared with third parties, possibly for analytics or advertising.",
+            FlagResult.Severity.MEDIUM,
+            "third parties", "third-party", "third party"
+        ),
+        new Rule(
+            "Subscription / auto-renew",
+            "Billing",
+            "This service may auto-renew or charge you on a recurring basis unless you cancel.",
+            FlagResult.Severity.MEDIUM,
+            "auto-renew", "auto renew", "automatically renew", "subscription"
+        ),
+        new Rule(
+            "Account termination",
+            "Account control",
+            "The provider may suspend or terminate your account, sometimes without much notice.",
+            FlagResult.Severity.MEDIUM,
+            "terminate your account", "suspend your account", "without notice"
+        )
     };
 
     public List<FlagResult> analyze(String text) {
-        List<FlagResult> found = new ArrayList<>();
+        List<FlagResult> results = new ArrayList<>();
+
+        if (text == null || text.isBlank()) {
+            return results;
+        }
+
         String lower = text.toLowerCase();
 
         for (Rule rule : RULES) {
-            int idx = lower.indexOf(rule.keyword.toLowerCase());
-            if (idx >= 0) {
-                String snippet = buildSnippet(text, idx, rule.keyword.length());
-                FlagResult result = new FlagResult(
-                        rule.title,
-                        rule.category,
-                        rule.explanation,
-                        rule.severity,
-                        snippet
-                );
-                found.add(result);
+            for (String pattern : rule.patterns) {
+                String p = pattern.toLowerCase();
+                int idx = lower.indexOf(p);
+
+                while (idx >= 0) {
+                    String snippet = extractSnippet(text, idx, p.length());
+                    results.add(new FlagResult(
+                            rule.title,
+                            rule.category,
+                            rule.explanation,
+                            rule.severity,
+                            snippet,
+                            idx
+                    ));
+                    idx = lower.indexOf(p, idx + p.length());
+                }
             }
         }
 
-        if (found.isEmpty()) {
-            found.add(new FlagResult(
-                    "No obvious red flags",
+        if (results.isEmpty()) {
+            results.add(new FlagResult(
+                    "No obvious red-flag keywords detected",
                     "General",
-                    "No major issues were detected by this simple checker (this is not legal advice).",
+                    "We did not find matches for our current rule set, but this is not legal advice.",
                     FlagResult.Severity.LOW,
-                    ""
+                    "",
+                    -1
             ));
         }
 
-        return found;
+        return results;
     }
 
-    private String buildSnippet(String full, int index, int length) {
-        int window = 120;
-        int start = Math.max(0, index - window);
-        int end = Math.min(full.length(), index + length + window);
-        String snippet = full.substring(start, end).trim();
-        return snippet.replaceAll("\\s+", " ");
+        // --- Overall risk scoring helpers ---
+
+    /**
+     * Compute a simple 0–100 "safety" score from the list of flags.
+     * 100 = very user-friendly, 0 = very risky.
+     * This is just a heuristic, not legal advice.
+     */
+    public static int computeRiskScore(java.util.List<FlagResult> flags) {
+        if (flags == null || flags.isEmpty()) {
+            return 80; // neutral-ish if nothing found
+        }
+
+        int penalty = 0;
+
+        for (FlagResult f : flags) {
+            // Skip the "no obvious flags" informational item
+            if (f.getStartIndex() < 0) continue;
+
+            switch (f.getSeverity()) {
+                case HIGH -> penalty += 25;
+                case MEDIUM -> penalty += 15;
+                case LOW -> penalty += 5;
+            }
+        }
+
+        int score = 100 - penalty;
+        if (score < 0) score = 0;
+        if (score > 100) score = 100;
+        return score;
+    }
+
+    /**
+     * Human-friendly label for the score.
+     */
+    public static String labelForScore(int score) {
+        if (score >= 80) return "Generally user-friendly";
+        if (score >= 60) return "Some concerns";
+        if (score >= 40) return "Risky for users";
+        return "Very risky / one-sided";
+    }
+
+    private String extractSnippet(String text, int index, int length) {
+        int context = 90; // chars around the match
+        int start = Math.max(0, index - context);
+        int end = Math.min(text.length(), index + length + context);
+
+        String raw = text.substring(start, end);
+        // flatten whitespace for display
+        return raw.replaceAll("\\s+", " ").trim();
     }
 }

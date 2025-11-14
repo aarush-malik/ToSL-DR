@@ -7,6 +7,12 @@ import com.tosldr.services.SummarizerService;
 
 import javax.swing.*;
 import java.awt.*;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+
+import com.tosldr.services.WebFetcher;
 
 public class MainGUI extends JFrame {
 
@@ -17,6 +23,7 @@ public class MainGUI extends JFrame {
     private JTextArea summaryArea;
     private JList<FlagResult> flagsList;
     private JProgressBar progressBar;
+    private JLabel scoreLabel;
 
     private final SummarizerService summarizerService;
     private final FlagAnalyzer flagAnalyzer;
@@ -48,6 +55,9 @@ public class MainGUI extends JFrame {
         // URL bar at top
         JPanel urlPanel = new JPanel(new BorderLayout(5, 5));
         urlField = new JTextField();
+        // Enable Cmd+V paste on macOS for URL field
+        KeyStroke pasteKeyURL = KeyStroke.getKeyStroke("meta V");
+        urlField.getInputMap().put(pasteKeyURL, "paste");
         fetchButton = new JButton("Fetch ToS from URL");
         urlPanel.setBorder(BorderFactory.createTitledBorder("Load from URL"));
         urlPanel.add(urlField, BorderLayout.CENTER);
@@ -86,11 +96,13 @@ public class MainGUI extends JFrame {
                 if (flag == null || flag.getSnippet().isEmpty()) return;
 
                 String full = inputArea.getText();
-                int idx = full.indexOf(flag.getSnippet());
-                if (idx >= 0) {
+                int idx = flag.getStartIndex();
+
+                if (idx >= 0 && idx < full.length()) {
                     inputArea.requestFocusInWindow();
                     inputArea.setCaretPosition(idx);
-                    inputArea.select(idx, idx + flag.getSnippet().length());
+                    int end = Math.min(full.length(), idx + flag.getSnippet().length());
+                    inputArea.select(idx, end);
                 }
             }
         });
@@ -101,6 +113,12 @@ public class MainGUI extends JFrame {
         flagsPanel.setBorder(
                 BorderFactory.createTitledBorder("Risk & Key Clauses (color-coded)")
         );
+        
+        scoreLabel = new JLabel("Overall risk score: —");
+        scoreLabel.setFont(new Font("SansSerif", Font.BOLD, 12));
+        scoreLabel.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+
+        flagsPanel.add(scoreLabel, BorderLayout.NORTH);
         flagsPanel.add(flagsScroll, BorderLayout.CENTER);
         flagsPanel.add(buildLegendPanel(), BorderLayout.SOUTH);
 
@@ -133,15 +151,50 @@ public class MainGUI extends JFrame {
         add(centerSplit, BorderLayout.CENTER);
         add(bottomPanel, BorderLayout.SOUTH);
 
-        // TEMP fetch action
+        // REAL fetch action (async)
         fetchButton.addActionListener(e -> {
             String url = urlField.getText().trim();
             if (url.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "Enter a URL first.");
-            } else {
-                inputArea.setText(
-                        "Mock fetched content from: " + url + "\n\n(real fetch coming later)");
+                return;
             }
+
+            // Add scheme if user forgot it
+            if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                url = "https://" + url;
+            }
+
+            String finalUrl = url;
+            inputArea.setText("Fetching content from: " + finalUrl + " ...");
+            fetchButton.setEnabled(false);
+            summarizeButton.setEnabled(false);
+
+            new Thread(() -> {
+                try {
+                    String tosText = fetchTosFromUrl(finalUrl);
+                    SwingUtilities.invokeLater(() -> {
+                        fetchButton.setEnabled(true);
+                        summarizeButton.setEnabled(true);
+                        if (tosText.isBlank()) {
+                            inputArea.setText("No readable text found at:\n" + finalUrl);
+                        } else {
+                            inputArea.setText(tosText);
+                            inputArea.setCaretPosition(0);
+                        }
+                    });
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                    SwingUtilities.invokeLater(() -> {
+                        fetchButton.setEnabled(true);
+                        summarizeButton.setEnabled(true);
+                        JOptionPane.showMessageDialog(this,
+                                "Failed to fetch terms from URL:\n" + ex.getMessage(),
+                                "Fetch Error",
+                                JOptionPane.ERROR_MESSAGE);
+                        inputArea.setText("");
+                    });
+                }
+            }).start();
         });
 
         // Summarize button
@@ -165,6 +218,11 @@ public class MainGUI extends JFrame {
                         progressBar.setVisible(false);
                         summaryArea.setText(summary);
                         flagsList.setListData(flags.toArray(new FlagResult[0]));
+
+                        // Compute and display overall risk score
+                        int score = FlagAnalyzer.computeRiskScore(flags);
+                        String label = FlagAnalyzer.labelForScore(score);
+                        scoreLabel.setText("Overall risk score: " + score + "/100 (" + label + ")");
                     });
                 } catch (Exception ex) {
                     ex.printStackTrace();
@@ -178,6 +236,35 @@ public class MainGUI extends JFrame {
                 }
             }).start();
         });
+    }
+
+    // --- URL fetch + HTML→text helpers ---
+
+    private String fetchTosFromUrl(String url) throws Exception {
+        String html = WebFetcher.fetch(url);   // uses your redirect + UA logic
+        return htmlToPlainText(html);
+    }
+
+    private String htmlToPlainText(String html) {
+        if (html == null || html.isBlank()) return "";
+
+        // strip scripts and styles
+        String noScript = html.replaceAll("(?is)<script.*?>.*?</script>", " ");
+        String noStyle  = noScript.replaceAll("(?is)<style.*?>.*?</style>", " ");
+
+        // convert some tags to newlines
+        String withBreaks = noStyle
+                .replaceAll("(?i)<br\\s*/?>", "\n")
+                .replaceAll("(?i)</p>", "\n\n");
+
+        // remove all remaining tags
+        String textOnly = withBreaks.replaceAll("(?s)<[^>]+>", " ");
+
+        // collapse whitespace
+        return textOnly
+                .replaceAll("[ \\t]+", " ")
+                .replaceAll("\\n{3,}", "\n\n")
+                .trim();
     }
 
     // Color-coded flag renderer

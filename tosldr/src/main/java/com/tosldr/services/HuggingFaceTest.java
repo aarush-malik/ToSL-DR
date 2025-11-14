@@ -3,9 +3,7 @@ package com.tosldr.services;
 public class HuggingFaceTest {
 
     public static void main(String[] args) throws Exception {
-        // TEMP: put your new HF token here just to test.
-        // After confirming it works, DELETE this from code.
-        String token = "hf_NEW_TOKEN";
+        String token = System.getenv("HF_TOKEN");
 
         if (token == null || token.isBlank()) {
             System.out.println("❌ HF token is empty.");
@@ -17,7 +15,7 @@ public class HuggingFaceTest {
         HuggingFaceClient client = new HuggingFaceClient(token);
         String summary = client.summarize(sample);
 
-        System.out.println("✅ API call succeeded!");
+        System.out.println("Status: 200 (simulated — remove debug if needed)");
         System.out.println("Summary:\n" + summary);
     }
 }
