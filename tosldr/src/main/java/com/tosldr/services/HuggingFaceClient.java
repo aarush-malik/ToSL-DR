@@ -16,8 +16,9 @@ import java.net.http.HttpResponse;
 public class HuggingFaceClient {
 
     // DistilBART ToS model endpoint
-    private static final String API_URL =
-        "https://router.huggingface.co/hf-inference/models/ml6team/distilbart-tos-summarizer-tosdr";
+    // A hosted summarization model
+private static final String API_URL =
+    "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn";
 
     private final HttpClient httpClient;
     private final String apiToken;
@@ -43,7 +44,7 @@ public class HuggingFaceClient {
                 .build();
 
         HttpResponse<String> response =
-                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
             throw new IOException("HF API error: " + response.statusCode() + " | " + response.body());
